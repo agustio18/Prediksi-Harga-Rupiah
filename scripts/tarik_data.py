@@ -5,7 +5,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from config import TANGGAL_MULAI, TICKER
-from src.db import buat_tabel, catat_log, get_engine, simpan_harian, tanggal_terakhir
+from src.db import (
+    buat_tabel,
+    catat_log,
+    get_engine,
+    simpan_harian,
+    tanggal_terakhir,
+    ambil_harian_tersimpan,
+)
 from src.ingestion import ambil_data_harian, ke_mingguan, validasi
 
 
@@ -35,18 +42,30 @@ def main():
             print("Gagal: tidak ada baris valid.")
             return
 
-        jumlah = simpan_harian(df_bersih, engine)
+        jumlah_diproses = simpan_harian(df_bersih, engine)
 
-        mingguan = ke_mingguan(df_bersih)
-        print(f"Baris harian dikirim : {jumlah}")
-        print(f"Baris mingguan terbentuk: {len(mingguan)}")
+        # Mengambil seluruh data harian dari PostgreSQL
+        df_historis = ambil_harian_tersimpan(engine)
+
+        # Membentuk data mingguan dari seluruh data historis
+        mingguan = ke_mingguan(df_historis)
+
+        print(f"Baris harian diproses: {jumlah_diproses}")
+        print(f"Total data harian di database: {len(df_historis)}")
+        print(f"Total data mingguan historis: {len(mingguan)}")
+
+        if not mingguan.empty:
+            print(
+                f"Rentang mingguan: {mingguan['tanggal'].min().date()} "
+                f"sampai {mingguan['tanggal'].max().date()}"
+            )
         print(
             f"Rentang: {df_bersih['tanggal'].min().date()} sampai "
             f"{df_bersih['tanggal'].max().date()}"
         )
 
         pesan = "; ".join(catatan) if catatan else None
-        catat_log(engine, "SUKSES", jumlah, pesan)
+        catat_log(engine, "SUKSES", jumlah_diproses, pesan)
         if catatan:
             print(f"Catatan PERIKSA: {len(catatan)}")
             for c in catatan:

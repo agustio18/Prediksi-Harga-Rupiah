@@ -28,35 +28,149 @@ def validasi(df):
         return df, []
 
     data = df.copy()
-    data["tanggal"] = pd.to_datetime(data["tanggal"]).dt.normalize()
 
-    #Buang tanggal/close kosong
-    data = data.dropna(subset=["tanggal", "close"])
+    # Memastikan tipe data benar
+    data["tanggal"] = pd.to_datetime(
+        data["tanggal"], errors="coerce"
+    ).dt.normalize()
 
-    #Buang close di luar rentang wajar
-    data = data[(data["close"] >= HARGA_MIN) & (data["close"] <= HARGA_MAX)]
-
-    #Duplikat tanggal ambil data terakhir
-    data = data.sort_values("tanggal").drop_duplicates("tanggal", keep="last")
-    data = data.reset_index(drop=True)
+    for kolom in ["open", "high", "low", "close"]:
+        data[kolom] = pd.to_numeric(
+            data[kolom], errors="coerce"
+        )
 
     catatan = []
 
-    #Perubahan harga > 3%
-    selisih = data["close"].pct_change() * 100
-    for i in selisih[selisih.abs() > 3].index:
-        tanggal = data.loc[i, "tanggal"].date()
+    # 1. Buang tanggal dan Close kosong
+    jumlah_awal = len(data)
+
+    data = data.dropna(subset=["tanggal", "close"])
+
+    jumlah_dibuang = jumlah_awal - len(data)
+
+    if jumlah_dibuang > 0:
         catatan.append(
-            f"PERIKSA perubahan {selisih.loc[i]:.2f}% pada {tanggal}"
+            f"DIBUANG {jumlah_dibuang} baris karena tanggal/Close kosong"
         )
 
-    #Celah tanggal > 7 hari
-    jarak = data["tanggal"].diff().dt.days
-    for i in jarak[jarak > 7].index:
+    # 2. Buang Close di luar rentang harga
+    harga_wajar = data["close"].between(
+        HARGA_MIN, HARGA_MAX
+    )
+
+    jumlah_harga_aneh = (~harga_wajar).sum()
+
+    if jumlah_harga_aneh > 0:
+        catatan.append(
+            f"DIBUANG {jumlah_harga_aneh} baris karena Close di luar rentang"
+        )
+
+    data = data[harga_wajar].copy()
+
+    # 3. Urutkan tanggal dan hapus duplikat
+    data = data.sort_values("tanggal")
+    data = data.drop_duplicates("tanggal", keep="last")
+    data = data.reset_index(drop=True)
+
+    # Semua data dianggap VALID terlebih dahulu
+    data["status"] = "VALID"
+
+    def tandai_periksa(mask, alasan):
+        mask = mask.fillna(False)
+
+        data.loc[mask, "status"] = "PERIKSA"
+
+        for i in data.index[mask]:
+            tanggal = data.loc[i, "tanggal"].date()
+
+            catatan.append(
+                f"PERIKSA {alasan} pada {tanggal}"
+            )
+
+    # 4. Periksa kelengkapan OHLC
+    ohlc_kosong = data[
+        ["open", "high", "low", "close"]
+    ].isna().any(axis=1)
+
+    tandai_periksa(
+        ohlc_kosong,
+        "OHLC tidak lengkap"
+    )
+
+    # 5. Periksa High lebih rendah daripada Low
+    high_low_aneh = (
+        data["high"].notna()
+        & data["low"].notna()
+        & (data["high"] < data["low"])
+    )
+
+    tandai_periksa(
+        high_low_aneh,
+        "High lebih rendah dari Low"
+    )
+
+    # 6. Periksa Open di luar rentang Low-High
+    open_aneh = (
+        data["open"].notna()
+        & data["low"].notna()
+        & data["high"].notna()
+        & (
+            (data["open"] < data["low"])
+            | (data["open"] > data["high"])
+        )
+    )
+
+    tandai_periksa(
+        open_aneh,
+        "Open di luar rentang Low-High"
+    )
+
+    # 7. Periksa Close di luar rentang Low-High
+    close_aneh = (
+        data["close"].notna()
+        & data["low"].notna()
+        & data["high"].notna()
+        & (
+            (data["close"] < data["low"])
+            | (data["close"] > data["high"])
+        )
+    )
+
+    tandai_periksa(
+        close_aneh,
+        "Close di luar rentang Low-High"
+    )
+
+    # 8. Perubahan harga harian lebih dari 3%
+    perubahan = data["close"].pct_change(fill_method=None) * 100
+
+    perubahan_aneh = perubahan.abs() > 3
+
+    for i in data.index[perubahan_aneh.fillna(False)]:
+        data.loc[i, "status"] = "PERIKSA"
+
         tanggal = data.loc[i, "tanggal"].date()
-        catatan.append(f"PERIKSA celah {int(jarak.loc[i])} hari sebelum {tanggal}")
+
+        catatan.append(
+            f"PERIKSA perubahan {perubahan.loc[i]:.2f}% pada {tanggal}"
+        )
+
+    # 9. Jarak antartanggal lebih dari 7 hari
+    jarak = data["tanggal"].diff().dt.days
+
+    celah_aneh = jarak > 7
+
+    for i in data.index[celah_aneh.fillna(False)]:
+        data.loc[i, "status"] = "PERIKSA"
+
+        tanggal = data.loc[i, "tanggal"].date()
+
+        catatan.append(
+            f"PERIKSA celah {int(jarak.loc[i])} hari sebelum {tanggal}"
+        )
 
     return data, catatan
+
 
 
 def ke_mingguan(df, hari_ini=None):

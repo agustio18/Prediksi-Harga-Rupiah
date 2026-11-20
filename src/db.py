@@ -29,11 +29,41 @@ def tanggal_terakhir(engine):
     return hasil
 
 
+def ambil_harian_tersimpan(engine):
+    """
+    Mengambil seluruh data harian yang sudah tersimpan di PostgreSQL.
+    """
+
+    query = text("""
+        SELECT tanggal, open, high, low, close
+        FROM harga_harian
+        ORDER BY tanggal ASC
+    """)
+
+    with engine.connect() as conn:
+        data = pd.read_sql_query(query, conn)
+
+    if data.empty:
+        return pd.DataFrame(
+            columns=["tanggal", "open", "high", "low", "close"]
+        )
+
+    data["tanggal"] = pd.to_datetime(data["tanggal"])
+
+    kolom_harga = ["open", "high", "low", "close"]
+
+    for kolom in kolom_harga:
+        data[kolom] = pd.to_numeric(data[kolom], errors="coerce")
+
+    return data
+
+
 def simpan_harian(df, engine):
     if df is None or df.empty:
         return 0
 
     baris = []
+
     for row in df.itertuples(index=False):
         baris.append(
             {
@@ -43,6 +73,7 @@ def simpan_harian(df, engine):
                 "low": _angka(row.low),
                 "close": _angka(row.close),
                 "sumber": "yahoo",
+                "status": getattr(row, "status", "VALID"),
             }
         )
 
@@ -50,7 +81,9 @@ def simpan_harian(df, engine):
 
     meta = MetaData()
     tabel = Table("harga_harian", meta, autoload_with=engine)
+
     stmt = insert(tabel).values(baris)
+
     stmt = stmt.on_conflict_do_update(
         index_elements=["tanggal"],
         set_={
@@ -59,32 +92,41 @@ def simpan_harian(df, engine):
             "low": stmt.excluded.low,
             "close": stmt.excluded.close,
             "sumber": stmt.excluded.sumber,
+            "status": stmt.excluded.status,
             "diperbarui": text("NOW()"),
         },
     )
 
     with engine.begin() as conn:
         conn.execute(stmt)
+
     return len(baris)
 
 
-def catat_log(engine, status, baris_baru=0, pesan=None, sumber="yahoo"):
-  
+
+def catat_log(
+    engine,
+    status,
+    baris_diproses=0,
+    pesan=None,
+    sumber="yahoo"
+):
     stmt = text(
-        "INSERT INTO log_update (sumber, baris_baru, status, pesan) "
-        "VALUES (:sumber, :baris_baru, :status, :pesan)"
+        "INSERT INTO log_update "
+        "(sumber, baris_diproses, status, pesan) "
+        "VALUES (:sumber, :baris_diproses, :status, :pesan)"
     )
+
     with engine.begin() as conn:
         conn.execute(
             stmt,
             {
                 "sumber": sumber,
-                "baris_baru": baris_baru,
+                "baris_diproses": baris_diproses,
                 "status": status,
                 "pesan": pesan,
             },
         )
-
 
 def _ke_date(nilai):
     if isinstance(nilai, date):
