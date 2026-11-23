@@ -1,6 +1,5 @@
 import pandas as pd
 
-
 def hitung_fitur(mingguan):
     """
     Menghitung lima fitur dan target return minggu berikutnya
