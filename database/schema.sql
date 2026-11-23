@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS model_versi (
     aktif                BOOLEAN DEFAULT FALSE
 );
 
+ALTER TABLE model_versi
+ADD COLUMN IF NOT EXISTS tanggal_uji_awal DATE;
+
+ALTER TABLE model_versi
+ADD COLUMN IF NOT EXISTS tanggal_uji_akhir DATE;
+
 
 CREATE TABLE IF NOT EXISTS prediksi (
     id             SERIAL PRIMARY KEY,
