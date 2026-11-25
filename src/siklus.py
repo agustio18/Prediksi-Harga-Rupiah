@@ -38,10 +38,19 @@ from src.model import (
 # 1. MEMERIKSA KELENGKAPAN DATA MINGGUAN
 # ============================================================
 
-def periksa_data_mingguan(mingguan):
+
+
+def periksa_data_mingguan(
+    mingguan,
+    hari_ini=None,
+    toleransi_hari=2
+):
     """
-    Memastikan data mingguan terakhir merupakan
-    data dari Jumat terakhir yang sudah selesai.
+    Memeriksa kelengkapan data mingguan dan memberikan
+    peringatan jika terdapat data berstatus PERIKSA.
+
+    Data PERIKSA tidak dibuang dan tidak otomatis
+    menghentikan proses prediksi.
     """
 
     if mingguan is None or mingguan.empty:
@@ -49,9 +58,29 @@ def periksa_data_mingguan(mingguan):
             "Data mingguan tidak tersedia."
         )
 
-    hari_ini = pd.Timestamp.now().normalize()
+    kolom_wajib = [
+        "tanggal",
+        "tanggal_data_terakhir",
+        "status",
+        "jumlah_periksa",
+    ]
 
-    # Mencari Jumat terakhir yang sudah selesai.
+    for kolom in kolom_wajib:
+        if kolom not in mingguan.columns:
+            raise ValueError(
+                f"Kolom {kolom} tidak tersedia pada data mingguan."
+            )
+
+    data = mingguan.sort_values(
+        "tanggal"
+    ).reset_index(drop=True)
+
+    if hari_ini is None:
+        hari_ini = pd.Timestamp.now().normalize()
+
+    hari_ini = pd.Timestamp(hari_ini).normalize()
+
+    # Menentukan Jumat terakhir yang sudah selesai.
     jarak_hari = (hari_ini.weekday() - 4) % 7
 
     if jarak_hari == 0:
@@ -59,40 +88,113 @@ def periksa_data_mingguan(mingguan):
 
     jumat_terakhir = (
         hari_ini - pd.Timedelta(days=jarak_hari)
-    ).date()
+    ).normalize()
 
-    tanggal_data = pd.Timestamp(
-        mingguan.iloc[-1]["tanggal"]
-    ).date()
+    baris_terakhir = data.iloc[-1]
 
-    if tanggal_data != jumat_terakhir:
+    tanggal_mingguan = pd.Timestamp(
+        baris_terakhir["tanggal"]
+    ).normalize()
+
+    tanggal_observasi = pd.Timestamp(
+        baris_terakhir["tanggal_data_terakhir"]
+    ).normalize()
+
+    # Memastikan label minggu sesuai Jumat terakhir.
+    if tanggal_mingguan != jumat_terakhir:
         raise RuntimeError(
             "Data mingguan belum mencapai Jumat terakhir "
-            f"yang seharusnya ({jumat_terakhir}). "
-            f"Data terakhir tersedia: {tanggal_data}. "
+            f"yang seharusnya ({jumat_terakhir.date()}). "
+            f"Data terakhir tersedia: {tanggal_mingguan.date()}. "
             "Prediksi baru tidak dibuat."
         )
 
-    return tanggal_data
+    # Observasi tidak boleh melewati batas minggu.
+    if tanggal_observasi > tanggal_mingguan:
+        raise RuntimeError(
+            "Tanggal observasi terakhir melewati batas minggu."
+        )
+
+    # Memeriksa jarak observasi terhadap Jumat.
+    selisih_hari = (
+        tanggal_mingguan - tanggal_observasi
+    ).days
+
+    if selisih_hari > toleransi_hari:
+        raise RuntimeError(
+            "Data mingguan terindikasi belum lengkap atau kedaluwarsa. "
+            f"Jumat terakhir: {tanggal_mingguan.date()}, "
+            f"observasi terakhir: {tanggal_observasi.date()}, "
+            f"selisih: {selisih_hari} hari. "
+            "Prediksi baru tidak dibuat."
+        )
+
+    # Menghitung total data harian berstatus PERIKSA.
+    total_periksa = int(data["jumlah_periksa"].sum())
+
+    # Memeriksa apakah minggu terakhir memiliki data PERIKSA.
+    status_terakhir = baris_terakhir["status"]
+    periksa_minggu_terakhir = int(
+        baris_terakhir["jumlah_periksa"]
+    )
+
+    print(
+        "Observasi terakhir minggu tersebut:",
+        tanggal_observasi.date()
+    )
+
+    print(
+        "Total data harian PERIKSA pada data mingguan:",
+        total_periksa
+    )
+
+    if periksa_minggu_terakhir > 0:
+        print(
+            "PERINGATAN: Minggu terakhir memiliki",
+            periksa_minggu_terakhir,
+            "data harian berstatus PERIKSA."
+        )
+
+    if total_periksa > 0 and periksa_minggu_terakhir == 0:
+        print(
+            "PERINGATAN: Terdapat data PERIKSA pada minggu-minggu "
+            "sebelumnya."
+        )
+
+    return tanggal_mingguan.date()
+
 
 
 # ============================================================
 # 2. MEMPERBARUI PREDIKSI SEBELUMNYA
 # ============================================================
 
-def perbarui_prediksi_lama(engine, mingguan):
+
+def perbarui_prediksi_lama(
+    engine,
+    mingguan,
+    prediksi_ids=None
+):
     """
-    Mengambil prediksi yang belum memiliki harga aktual,
-    kemudian memperbaruinya jika data aktual sudah tersedia.
+    Memperbarui prediksi yang harga aktualnya sudah tersedia.
+
+    prediksi_ids:
+        None  -> memperbarui seluruh prediksi yang belum aktual.
+        List  -> hanya memperbarui prediksi dengan ID tertentu.
     """
 
     prediksi_lama = ambil_prediksi_belum_aktual(engine)
+
+    # Membatasi data yang diperbarui jika ID diberikan.
+    if prediksi_ids is not None:
+        prediksi_lama = prediksi_lama[
+            prediksi_lama["id"].isin(prediksi_ids)
+        ].copy()
 
     if prediksi_lama.empty:
         print("Tidak ada prediksi lama yang perlu diperbarui.")
         return 0
 
-    # Membuat data harga aktual berdasarkan tanggal mingguan.
     data_aktual = mingguan.copy()
 
     data_aktual["tanggal"] = pd.to_datetime(
@@ -109,7 +211,6 @@ def perbarui_prediksi_lama(engine, mingguan):
             row.tanggal_target
         ).normalize()
 
-        # Lewati jika harga aktual belum tersedia.
         if tanggal_target not in data_aktual.index:
             continue
 
@@ -131,6 +232,7 @@ def perbarui_prediksi_lama(engine, mingguan):
             )
 
     return jumlah_diperbarui
+
 
 
 # ============================================================
@@ -299,9 +401,22 @@ def jalankan_siklus():
             f"Mengambil data {TICKER} sejak {mulai}..."
         )
 
+        # Menggunakan tanggal akhir eksplisit.
+        # Parameter end pada yfinance bersifat eksklusif.
+        akhir = (
+            pd.Timestamp.now().normalize()
+            + pd.Timedelta(days=1)
+        ).date()
+
+        print(
+            f"Mengambil data {TICKER} "
+            f"sejak {mulai} sampai sebelum {akhir}..."
+        )
+
         data_yahoo = ambil_data_harian(
             TICKER,
-            mulai=mulai
+            mulai=mulai,
+            akhir=akhir
         )
 
         # Tidak menggunakan data lama jika Yahoo gagal.

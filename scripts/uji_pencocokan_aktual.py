@@ -1,10 +1,10 @@
+
 from datetime import timedelta
 
 from sqlalchemy import text
 
 from src.db import (
     get_engine,
-    buat_tabel,
     ambil_harian_tersimpan,
     cek_prediksi_ada,
     simpan_prediksi,
@@ -12,6 +12,7 @@ from src.db import (
 
 from src.ingestion import ke_mingguan
 from src.siklus import perbarui_prediksi_lama
+from src.model import ambil_model_aktif
 
 
 def uji_pencocokan_aktual():
@@ -21,32 +22,38 @@ def uji_pencocokan_aktual():
     try:
         print("=== UJI PENCOCOKAN HARGA AKTUAL ===")
 
-        buat_tabel(engine)
+        # Mengambil model aktif yang sebenarnya.
+        model_info = ambil_model_aktif(engine)
 
-        # Mengambil data mingguan dari database.
+        if model_info is None:
+            raise RuntimeError(
+                "Tidak ada model aktif untuk pengujian."
+            )
+
+        model_id = model_info["id"]
+
+        # Mengambil data mingguan.
         harian = ambil_harian_tersimpan(engine)
         mingguan = ke_mingguan(harian)
 
         if mingguan.empty:
             raise ValueError("Data mingguan tidak tersedia.")
 
-        # Menggunakan tanggal mingguan terakhir yang sudah tersedia.
-        tanggal_target = mingguan.iloc[-1]["tanggal"].date()
+        baris_terakhir = mingguan.iloc[-1]
 
-        harga_aktual = float(
-            mingguan.iloc[-1]["close"]
-        )
+        tanggal_target = baris_terakhir["tanggal"].date()
+        harga_aktual = float(baris_terakhir["close"])
 
         tanggal_acuan = tanggal_target - timedelta(days=7)
 
         # Memastikan prediksi sementara tidak bentrok.
-        if cek_prediksi_ada(engine, tanggal_acuan, 1):
+        if cek_prediksi_ada(engine, tanggal_acuan, model_id):
             raise ValueError(
                 "Tanggal acuan sudah memiliki prediksi "
-                "untuk model ID 1. Pengujian dibatalkan."
+                "untuk model aktif. Pengujian dibatalkan."
             )
 
-        # Membuat data prediksi sementara.
+        # Membuat prediksi sementara.
         harga_acuan = harga_aktual * 0.999
         harga_prediksi = harga_aktual * 1.001
 
@@ -61,7 +68,7 @@ def uji_pencocokan_aktual():
             harga_acuan=harga_acuan,
             return_persen=return_persen,
             harga_prediksi=harga_prediksi,
-            model_id=1,
+            model_id=model_id,
         )
 
         if prediksi_id is None:
@@ -72,15 +79,18 @@ def uji_pencocokan_aktual():
         print("Prediksi sementara berhasil dibuat.")
         print("ID:", prediksi_id)
         print("Tanggal target:", tanggal_target)
-        print("Harga aktual:", harga_aktual)
 
-        # Menjalankan fungsi pencocokan yang sebenarnya.
+        # Hanya memperbarui ID pengujian ini.
         jumlah = perbarui_prediksi_lama(
             engine,
-            mingguan
+            mingguan,
+            prediksi_ids=[prediksi_id],
         )
 
-        print("\nJumlah prediksi diperbarui:", jumlah)
+        if jumlah != 1:
+            raise AssertionError(
+                "Prediksi sementara tidak berhasil diperbarui."
+            )
 
         # Memeriksa hasil pembaruan.
         with engine.connect() as conn:
@@ -94,8 +104,13 @@ def uji_pencocokan_aktual():
                     FROM prediksi
                     WHERE id = :id
                 """),
-                {"id": prediksi_id}
+                {"id": prediksi_id},
             ).mappings().first()
+
+        if hasil is None:
+            raise RuntimeError(
+                "Hasil prediksi sementara tidak ditemukan."
+            )
 
         print("\n=== HASIL PENGUJIAN ===")
         print("Harga aktual:", hasil["harga_aktual"])
@@ -103,13 +118,12 @@ def uji_pencocokan_aktual():
         print("Galat (%):", hasil["galat_persen"])
         print("Arah benar:", hasil["arah_benar"])
 
-        if hasil["harga_aktual"] is not None:
-            print("\nPENGUJIAN BERHASIL")
-        else:
-            print("\nPENGUJIAN GAGAL")
+        assert hasil["harga_aktual"] is not None
+
+        print("\nPENGUJIAN BERHASIL")
 
     finally:
-        # Menghapus baris sementara agar database tetap bersih.
+        # Hanya menghapus prediksi sementara milik pengujian.
         if prediksi_id is not None:
             with engine.begin() as conn:
                 conn.execute(
@@ -117,10 +131,10 @@ def uji_pencocokan_aktual():
                         DELETE FROM prediksi
                         WHERE id = :id
                     """),
-                    {"id": prediksi_id}
+                    {"id": prediksi_id},
                 )
 
-            print("\nData pengujian sementara sudah dihapus.")
+            print("\nPrediksi sementara sudah dihapus.")
 
         engine.dispose()
 

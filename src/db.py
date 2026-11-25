@@ -31,11 +31,18 @@ def tanggal_terakhir(engine):
 
 def ambil_harian_tersimpan(engine):
     """
-    Mengambil seluruh data harian yang sudah tersimpan di PostgreSQL.
+    Mengambil seluruh data harian dari PostgreSQL,
+    termasuk status VALID dan PERIKSA.
     """
 
     query = text("""
-        SELECT tanggal, open, high, low, close
+        SELECT
+            tanggal,
+            open,
+            high,
+            low,
+            close,
+            status
         FROM harga_harian
         ORDER BY tanggal ASC
     """)
@@ -45,7 +52,14 @@ def ambil_harian_tersimpan(engine):
 
     if data.empty:
         return pd.DataFrame(
-            columns=["tanggal", "open", "high", "low", "close"]
+            columns=[
+                "tanggal",
+                "open",
+                "high",
+                "low",
+                "close",
+                "status",
+            ]
         )
 
     data["tanggal"] = pd.to_datetime(data["tanggal"])
@@ -53,9 +67,20 @@ def ambil_harian_tersimpan(engine):
     kolom_harga = ["open", "high", "low", "close"]
 
     for kolom in kolom_harga:
-        data[kolom] = pd.to_numeric(data[kolom], errors="coerce")
+        data[kolom] = pd.to_numeric(
+            data[kolom],
+            errors="coerce"
+        )
+
+    data["status"] = (
+        data["status"]
+        .fillna("VALID")
+        .astype(str)
+        .str.upper()
+    )
 
     return data
+
 
 
 def simpan_harian(df, engine):

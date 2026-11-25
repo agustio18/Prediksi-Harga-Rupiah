@@ -1,44 +1,58 @@
+
 from unittest.mock import patch
 
-from src.db import (
-    get_engine,
-    ambil_harian_tersimpan,
-)
+import pandas as pd
 
-from src.ingestion import ke_mingguan
 from src.siklus import buat_prediksi_baru
 
 
 def uji_model_tidak_aktif():
-    engine = get_engine()
+    print("=== UJI MODEL TIDAK AKTIF ===")
 
-    try:
-        print("=== UJI MODEL TIDAK AKTIF ===")
+    # Simulasi kondisi tidak ada model aktif.
+    with patch(
+        "src.siklus.ambil_model_aktif",
+        return_value=None
+    ) as mock_model:
 
-        harian = ambil_harian_tersimpan(engine)
-        mingguan = ke_mingguan(harian)
+        try:
+            # Tidak memerlukan koneksi database karena
+            # fungsi seharusnya berhenti sebelum mengaksesnya.
+            buat_prediksi_baru(
+                engine=None,
+                mingguan=pd.DataFrame()
+            )
 
-        jumlah_awal = len(mingguan)
+        except RuntimeError as error:
 
-        # Simulasi tidak ada model aktif.
-        with patch(
-            "src.siklus.ambil_model_aktif",
-            return_value=None
-        ):
-            try:
-                buat_prediksi_baru(engine, mingguan)
-                print("PENGUJIAN GAGAL")
-                print("Sistem seharusnya menolak proses prediksi.")
+            pesan = str(error)
 
-            except Exception as error:
-                print("Pesan kesalahan:", error)
-                print("\nPENGUJIAN BERHASIL")
-                print("Sistem menolak prediksi tanpa model aktif.")
+            pesan_diharapkan = (
+                "Tidak ada model SVR aktif di database."
+            )
 
-        print("\nJumlah data mingguan:", jumlah_awal)
+            if pesan_diharapkan not in pesan:
+                raise AssertionError(
+                    f"Pesan error tidak sesuai: {pesan}"
+                ) from error
 
-    finally:
-        engine.dispose()
+            print("Pesan kesalahan:", pesan)
+            print("\nPENGUJIAN BERHASIL")
+            print(
+                "Sistem menolak prediksi karena "
+                "model aktif tidak tersedia."
+            )
+
+        else:
+            raise AssertionError(
+                "Sistem seharusnya menolak prediksi "
+                "ketika model aktif tidak tersedia."
+            )
+
+        assert mock_model.call_count == 1
+
+    print("\nTidak ada perubahan pada database.")
+    print("Semua pengujian berhasil.")
 
 
 if __name__ == "__main__":

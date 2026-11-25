@@ -172,25 +172,106 @@ def validasi(df):
     return data, catatan
 
 
-
 def ke_mingguan(df, hari_ini=None):
+    """
+    Mengubah data harian menjadi mingguan W-FRI.
+
+    Menyimpan tanggal observasi terakhir dan status
+    pemeriksaan setiap kelompok minggu.
+    """
+
+    kolom_hasil = [
+        "tanggal",
+        "open",
+        "high",
+        "low",
+        "close",
+        "tanggal_data_terakhir",
+        "status",
+        "jumlah_periksa",
+    ]
+
     if df is None or df.empty:
-        return pd.DataFrame(columns=["tanggal", "open", "high", "low", "close"])
+        return pd.DataFrame(columns=kolom_hasil)
 
     data = df.copy()
-    data["tanggal"] = pd.to_datetime(data["tanggal"]).dt.normalize()
-    data = data.set_index("tanggal")
 
-    mingguan = data.resample("W-FRI").agg(
-        {"open": "first", "high": "max", "low": "min", "close": "last"}
+    # Memastikan tipe data dan urutan tanggal.
+    data["tanggal"] = pd.to_datetime(
+        data["tanggal"]
+    ).dt.normalize()
+
+    data = data.sort_values("tanggal").reset_index(drop=True)
+
+    # Jika status tidak tersedia, anggap VALID.
+    if "status" not in data.columns:
+        data["status"] = "VALID"
+    else:
+        data["status"] = (
+            data["status"]
+            .fillna("VALID")
+            .astype(str)
+            .str.upper()
+        )
+
+    # Menentukan tanggal Jumat untuk setiap observasi.
+    tambahan_hari = (
+        4 - data["tanggal"].dt.weekday
+    ) % 7
+
+    data["tanggal_mingguan"] = (
+        data["tanggal"]
+        + pd.to_timedelta(tambahan_hari, unit="D")
     )
-    mingguan = mingguan.dropna(subset=["close"])
 
+    # Menggabungkan data harian menjadi mingguan.
+    mingguan = (
+        data.groupby("tanggal_mingguan", as_index=False)
+        .agg(
+            open=("open", "first"),
+            high=("high", "max"),
+            low=("low", "min"),
+            close=("close", "last"),
+            tanggal_data_terakhir=("tanggal", "last"),
+            status=(
+                "status",
+                lambda nilai: (
+                    "PERIKSA"
+                    if (nilai == "PERIKSA").any()
+                    else "VALID"
+                )
+            ),
+            jumlah_periksa=(
+                "status",
+                lambda nilai: int(
+                    (nilai == "PERIKSA").sum()
+                )
+            ),
+        )
+        .rename(columns={
+            "tanggal_mingguan": "tanggal"
+        })
+    )
+
+    # Menentukan Jumat terakhir yang sudah selesai.
     if hari_ini is None:
         hari_ini = pd.Timestamp.today().normalize()
+
     hari_ini = pd.Timestamp(hari_ini).normalize()
 
-    if not mingguan.empty and mingguan.index[-1] >= hari_ini:
-        mingguan = mingguan.iloc[:-1]
+    jarak_hari = (hari_ini.weekday() - 4) % 7
 
-    return mingguan.reset_index()
+    # Jika hari ini Jumat, Jumat hari ini belum selesai.
+    if jarak_hari == 0:
+        jarak_hari = 7
+
+    jumat_terakhir = (
+        hari_ini - pd.Timedelta(days=jarak_hari)
+    )
+
+    # Menghilangkan minggu yang belum selesai.
+    mingguan = mingguan[
+        mingguan["tanggal"] <= jumat_terakhir
+    ].reset_index(drop=True)
+
+    return mingguan
