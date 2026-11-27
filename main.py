@@ -1,9 +1,9 @@
 """
-Titik masuk program prediksi USD/IDR.
+Titik masuk program prediksi USD/IDR (Fase 1).
 
-Saat ini (Fase 3) main.py menjalankan pelatihan model SVR:
-ambil data dari PostgreSQL -> fitur -> tuning -> simpan model -> contoh prediksi.
-Pada Fase 5, file ini akan diganti dengan aplikasi desktop Tkinter.
+Alur Fase 1:
+ambil data historis dari Yahoo Finance -> validasi kualitas ->
+simpan ke PostgreSQL -> tampilkan laporan pemeriksaan.
 
 Jalankan dari folder utama proyek:  python main.py
 """
@@ -12,12 +12,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from scripts.latih_model import main as latih_model
-
 
 def main():
     try:
-        latih_model()
+        from scripts.tarik_data import main as tarik_data
+        from scripts.periksa_data import main as periksa_data
+
+        tarik_data()
+        print()
+        periksa_data()
     except RuntimeError as e:
         # Biasanya DATABASE_URL belum diisi di file .env
         print("Gagal:", e)

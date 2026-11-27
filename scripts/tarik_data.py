@@ -13,7 +13,7 @@ from src.db import (
     tanggal_terakhir,
     ambil_harian_tersimpan,
 )
-from src.ingestion import ambil_data_harian, ke_mingguan, validasi
+from src.ingestion import ambil_data_harian, validasi
 
 
 def main():
@@ -44,23 +44,21 @@ def main():
 
         jumlah_diproses = simpan_harian(df_bersih, engine)
 
-        # Mengambil seluruh data harian dari PostgreSQL
+        # Membaca kembali data harian dari PostgreSQL
+        # untuk memastikan data telah tersimpan.
         df_historis = ambil_harian_tersimpan(engine)
-
-        # Membentuk data mingguan dari seluruh data historis
-        mingguan = ke_mingguan(df_historis)
 
         print(f"Baris harian diproses: {jumlah_diproses}")
         print(f"Total data harian di database: {len(df_historis)}")
-        print(f"Total data mingguan historis: {len(mingguan)}")
 
-        if not mingguan.empty:
+        if not df_historis.empty:
             print(
-                f"Rentang mingguan: {mingguan['tanggal'].min().date()} "
-                f"sampai {mingguan['tanggal'].max().date()}"
+                f"Rentang di database: {df_historis['tanggal'].min().date()} "
+                f"sampai {df_historis['tanggal'].max().date()}"
             )
+
         print(
-            f"Rentang: {df_bersih['tanggal'].min().date()} sampai "
+            f"Rentang hasil ambil: {df_bersih['tanggal'].min().date()} sampai "
             f"{df_bersih['tanggal'].max().date()}"
         )
 

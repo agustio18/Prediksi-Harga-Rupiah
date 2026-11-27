@@ -53,24 +53,17 @@ def validasi(df):
             f"DIBUANG {jumlah_dibuang} baris karena tanggal/Close kosong"
         )
 
-    # 2. Buang Close di luar rentang harga
-    harga_wajar = data["close"].between(
-        HARGA_MIN, HARGA_MAX
-    )
-
-    jumlah_harga_aneh = (~harga_wajar).sum()
-
-    if jumlah_harga_aneh > 0:
-        catatan.append(
-            f"DIBUANG {jumlah_harga_aneh} baris karena Close di luar rentang"
-        )
-
-    data = data[harga_wajar].copy()
-
-    # 3. Urutkan tanggal dan hapus duplikat
+    # 2. Urutkan tanggal dan hapus duplikat
     data = data.sort_values("tanggal")
+
+    jumlah_duplikat = int(data["tanggal"].duplicated().sum())
     data = data.drop_duplicates("tanggal", keep="last")
     data = data.reset_index(drop=True)
+
+    if jumlah_duplikat > 0:
+        catatan.append(
+            f"DIBUANG {jumlah_duplikat} baris karena tanggal duplikat"
+        )
 
     # Semua data dianggap VALID terlebih dahulu
     data["status"] = "VALID"
@@ -86,6 +79,16 @@ def validasi(df):
             catatan.append(
                 f"PERIKSA {alasan} pada {tanggal}"
             )
+
+    # 3. Periksa Close di luar rentang harga
+    harga_wajar = data["close"].between(
+        HARGA_MIN, HARGA_MAX
+    )
+
+    tandai_periksa(
+        ~harga_wajar,
+        "Close di luar rentang 5000-50000"
+    )
 
     # 4. Periksa kelengkapan OHLC
     ohlc_kosong = data[
