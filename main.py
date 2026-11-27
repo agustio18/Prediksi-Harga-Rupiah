@@ -1,30 +1,80 @@
-"""
-Titik masuk program prediksi USD/IDR.
 
-Saat ini (Fase 3) main.py menjalankan pelatihan model SVR:
-ambil data dari PostgreSQL -> fitur -> tuning -> simpan model -> contoh prediksi.
-Pada Fase 5, file ini akan diganti dengan aplikasi desktop Tkinter.
+"""Menjalankan siklus dan menampilkan hasil prediksi USD/IDR."""
 
-Jalankan dari folder utama proyek:  python main.py
-"""
-import sys
-from pathlib import Path
+from sqlalchemy import text
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+from src.siklus import jalankan_siklus
+from src.db import get_engine
 
-from scripts.latih_model import main as latih_model
+
+def format_rupiah(nilai):
+    angka = f"{float(nilai):,.2f}"
+    angka = angka.replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"Rp{angka}"
+
+
+def format_persen(nilai):
+    return f"{float(nilai):.6f}".replace(".", ",") + "%"
 
 
 def main():
+    engine = None
+
     try:
-        latih_model()
-    except RuntimeError as e:
-        # Biasanya DATABASE_URL belum diisi di file .env
-        print("Gagal:", e)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Terjadi kesalahan: {type(e).__name__}: {e}")
-        sys.exit(1)
+        # Memperbarui data dan membuat prediksi jika belum tersedia.
+        jalankan_siklus()
+
+        # Mengambil prediksi terbaru dari database.
+        engine = get_engine()
+
+        sql = text("""
+            SELECT
+                tanggal_acuan,
+                tanggal_target,
+                harga_acuan,
+                return_persen,
+                harga_prediksi
+            FROM prediksi
+            ORDER BY tanggal_target DESC, tanggal_acuan DESC, id DESC
+            LIMIT 1
+        """)
+
+        with engine.connect() as conn:
+            prediksi = conn.execute(sql).mappings().first()
+
+        if prediksi is None:
+            print("\nBelum ada prediksi yang tersimpan.")
+            return
+
+        hasil_return = float(prediksi["return_persen"])
+
+        if hasil_return < 0:
+            kesimpulan = "Rupiah diprediksi MENGUAT"
+        elif hasil_return > 0:
+            kesimpulan = "Rupiah diprediksi MELEMAH"
+        else:
+            kesimpulan = "Kurs diprediksi TETAP"
+
+        print("\n" + "=" * 40)
+        print("       HASIL PREDIKSI USD/IDR")
+        print("=" * 40)
+
+        print("Tanggal acuan    :", prediksi["tanggal_acuan"])
+        print("Tanggal target   :", prediksi["tanggal_target"])
+        print("Harga acuan      :", format_rupiah(prediksi["harga_acuan"]))
+        print("Prediksi return  :", format_persen(hasil_return))
+        print("Prediksi harga   :", format_rupiah(prediksi["harga_prediksi"]))
+
+        print("-" * 40)
+        print("Kesimpulan       :", kesimpulan)
+        print("=" * 40)
+
+    except Exception as error:
+        print("\nGagal menampilkan prediksi:", error)
+
+    finally:
+        if engine is not None:
+            engine.dispose()
 
 
 if __name__ == "__main__":
