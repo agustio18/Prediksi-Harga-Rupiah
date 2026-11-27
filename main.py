@@ -21,7 +21,7 @@ def main():
     engine = None
 
     try:
-        # Memperbarui data dan membuat prediksi.
+        # Memperbarui data dan membuat prediksi jika belum tersedia.
         jalankan_siklus()
 
         # Mengambil prediksi terbaru dari database.
@@ -70,7 +70,7 @@ def main():
         print("=" * 40)
 
     except Exception as error:
-        print("\nGagal menjalankan prediksi:", error)
+        print("\nGagal menampilkan prediksi:", error)
 
     finally:
         if engine is not None:
