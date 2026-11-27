@@ -1,13 +1,16 @@
 CREATE TABLE IF NOT EXISTS harga_harian (
     tanggal     DATE PRIMARY KEY,
-    open        NUMERIC(14,4),
-    high        NUMERIC(14,4),
-    low         NUMERIC(14,4),
-    close       NUMERIC(14,4) NOT NULL,
+    open        NUMERIC(15,4),
+    high        NUMERIC(15,4),
+    low         NUMERIC(15,4),
+    close       NUMERIC(15,4) NOT NULL,
     sumber      VARCHAR(30) NOT NULL,
     status      VARCHAR(10) NOT NULL DEFAULT 'VALID',
     diperbarui  TIMESTAMP DEFAULT NOW()
 );
+
+ALTER TABLE harga_harian
+ADD COLUMN IF NOT EXISTS status VARCHAR(10) NOT NULL DEFAULT 'VALID';
 
 
 
@@ -64,6 +67,24 @@ CREATE TABLE IF NOT EXISTS log_update (
     status          VARCHAR(10),
     pesan           TEXT
 );
+
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'log_update'
+          AND column_name = 'baris_baru'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'log_update'
+          AND column_name = 'baris_diproses'
+    ) THEN
+        ALTER TABLE log_update RENAME COLUMN baris_baru TO baris_diproses;
+    END IF;
+END
+$$;
 
 
 CREATE UNIQUE INDEX IF NOT EXISTS
